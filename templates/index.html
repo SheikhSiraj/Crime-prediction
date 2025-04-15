@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css">
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    {% include "partials/header.html" %}
+    
+    <!-- Top Row - Map and Districts -->
+    <div class="row mb-4">
+        <!-- Map Section -->
+        <div class="col-lg-8 fade-in">
+            <div class="card h-100">
+                <div class="card-header bg-dark text-white">
+                    <i class="fas fa-map-marked-alt me-2"></i>
+                    <span>Crime Hotspots (Last 3 Months)</span>
+                </div>
+                <div class="card-body p-0 position-relative">
+                    <div id="mapLoading" class="map-loading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                    <div id="map" style="height: 500px;"></div>
+                    <div class="p-3 bg-light border-top">
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Hotspots colored by crime density (Red = High, Yellow = Medium, Green = Low)
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top Districts Card -->
+        <div class="col-lg-4 fade-in delay-1">
+            <div class="card h-100">
+                <div class="card-header bg-danger text-white d-flex align-items-center">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <span>High Risk Districts</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush district-list">
+                        {% for district, count in top_districts.items() %}
+                            <div class="list-group-item d-flex justify-content-between align-items-center py-3">
+                                <div class="d-flex align-items-center">
+                                    <div class="me-3 text-danger">
+                                        <i class="fas fa-map-marker-alt fa-lg"></i>
+                                    </div>
+                                    <div>
+                                        <h6 class="mb-0">{{ district }}</h6>
+                                        <small class="text-muted">{{ "{:,}".format(count) }} incidents</small>
+                                    </div>
+                                </div>
+                                <span class="badge bg-danger rounded-pill px-3 py-2">
+                                    {{ "%.1f"|format(count/top_districts.values()|sum * 100) }}%
+                                </span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Graphs Section -->
+    <div class="row mb-5 fade-in delay-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    <span>Crime Patterns Analysis</span>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h5 class="text-center mb-3"><i class="fas fa-clock me-2"></i>Hourly</h5>
+                            <div style="height: 300px;">
+                                <canvas id="hourChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <h5 class="text-center mb-3"><i class="fas fa-calendar-day me-2"></i>Daily</h5>
+                            <div style="height: 300px;">
+                                <canvas id="dayChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <h5 class="text-center mb-3"><i class="fas fa-calendar-alt me-2"></i>Monthly</h5>
+                            <div style="height: 300px;">
+                                <canvas id="monthChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js Configuration -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Hourly Chart
+    const hourCtx = document.getElementById('hourChart').getContext('2d');
+    new Chart(hourCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ graphs.hourly.labels | tojson }},
+            datasets: [{
+                data: {{ graphs.hourly.data | tojson }},
+                backgroundColor: '#3498db',
+                borderColor: '#2980b9',
+                borderWidth: 1
+            }]
+        },
+        options: getChartOptions('Crimes per hour')
+    });
+
+    // Daily Chart
+    const dayCtx = document.getElementById('dayChart').getContext('2d');
+    new Chart(dayCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ graphs.daily.labels | tojson }},
+            datasets: [{
+                data: {{ graphs.daily.data | tojson }},
+                backgroundColor: '#2ecc71',
+                borderColor: '#27ae60',
+                borderWidth: 1
+            }]
+        },
+        options: getChartOptions('Crimes per day')
+    });
+
+    // Monthly Chart
+    const monthCtx = document.getElementById('monthChart').getContext('2d');
+    new Chart(monthCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ graphs.monthly.labels | tojson }},
+            datasets: [{
+                data: {{ graphs.monthly.data | tojson }},
+                backgroundColor: '#e74c3c',
+                borderColor: '#c0392b',
+                borderWidth: 1
+            }]
+        },
+        options: getChartOptions('Crimes per month')
+    });
+
+    function getChartOptions(title) {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${title}: ${context.raw}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: { 
+                    beginAtZero: true,
+                    title: { display: true, text: 'Crime Count' }
+                }
+            }
+        };
+    }
+});
+</script>
+{% endblock %}
