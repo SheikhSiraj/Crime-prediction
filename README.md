@@ -1,4 +1,4 @@
-# San Francisco Crime Analysis Dashboard
+# *San Francisco Crime Analysis Dashboard*
 
 ## 📌 Overview
 
@@ -132,11 +132,6 @@ Errors are logged and displayed to users with appropriate messages.
    - Implements marker clustering for map points
    - Uses canvas-based chart rendering
    - Implements lazy loading where possible
-
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
