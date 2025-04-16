@@ -61,7 +61,7 @@ def load_data():
 def get_top_districts(df, top_n=5):
     return df["District"].value_counts().head(top_n).to_dict()
 
-def prepare_heatmap_data(df, sample_size=10000):
+def prepare_heatmap_data(df, sample_size=100000):
     try:
         if df.empty:
             logger.warning("Empty DataFrame received for heatmap")
