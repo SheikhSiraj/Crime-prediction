@@ -133,7 +133,7 @@ Errors are logged and displayed to users with appropriate messages.
    - Uses canvas-based chart rendering
    - Implements lazy loading where possible
 
-## 🙏 Acknowledgments
+## ✅ Acknowledgments
 
 - San Francisco Police Department for providing the crime data
 - OpenStreetMap for base map tiles
