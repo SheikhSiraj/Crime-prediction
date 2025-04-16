@@ -1,26 +1,14 @@
 from flask import Flask, render_template, request, jsonify
 import pandas as pd
-import pickle
 from utils import load_data, get_top_districts, prepare_heatmap_data, generate_graph_data
-from config import Config
+from datetime import datetime
 import logging
-from datetime import datetime 
 
 app = Flask(__name__)
-app.config.from_object(Config)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Load trained model and columns
-try:
-    model = pickle.load(open("model.pkl", "rb"))
-    model_columns = pickle.load(open("model_columns.pkl", "rb"))
-    logger.info("Model and model columns loaded successfully")
-except Exception as e:
-    logger.error(f"Error loading model files: {e}")
-    raise
 
 # Load and preprocess data
 try:
@@ -39,14 +27,10 @@ def index():
         # Graph data
         graphs = generate_graph_data(crime_df)
         
-        # Prepare heatmap data
-        heatmap_data = prepare_heatmap_data(crime_df)
-        
         return render_template(
             "index.html",
             top_districts=top_districts,
             graphs=graphs,
-            heatmap_data=heatmap_data,
             page_title="SF Crime Analysis Dashboard",
             current_year=datetime.now().year
         )
@@ -73,4 +57,4 @@ def internal_server_error(e):
     return render_template("error.html", error_message="Internal server error"), 500
 
 if __name__ == "__main__":
-    app.run(host=app.config['HOST'], port=app.config['PORT'])
+    app.run(host='0.0.0.0', port=5000)

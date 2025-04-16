@@ -1,5 +1,7 @@
 import pandas as pd
+import numpy as np
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -7,47 +9,51 @@ logger = logging.getLogger(__name__)
 
 def load_data():
     try:
-        df = pd.read_csv("data/SFPD_Incidents_2021_to_Present_Reduced.csv")
+        # Load only necessary columns
+        columns = [
+            'Incident Datetime',
+            'Incident Day of Week',
+            'Incident Category',
+            'Police District',
+            'Latitude',
+            'Longitude'
+        ]
+        
+        df = pd.read_parquet(
+            "data/SFPD_Incidents_2021_to_Present_Reduced.parquet",
+            columns=columns
+        )
         
         # Standardize column names
         column_mapping = {
-            'Incident Day of Week': 'Day',
             'Incident Datetime': 'Datetime',
-            'Incident Date': 'Date',
+            'Incident Day of Week': 'Day',
             'Incident Category': 'Category',
-            'Police District': 'District',
-            'Analysis Neighborhood': 'Neighborhood',
-            'Latitude': 'Latitude',
-            'Longitude': 'Longitude'
+            'Police District': 'District'
         }
+        df = df.rename(columns=column_mapping)
         
-        # Rename columns to standard names
-        df = df.rename(columns={k:v for k,v in column_mapping.items() if k in df.columns})
-        
-        # Convert datetime string to datetime object
+        # Convert and extract datetime fields
         df['Datetime'] = pd.to_datetime(df['Datetime'])
-        
-        # Extract Hour and Month from Datetime
-        df['Hour'] = df['Datetime'].dt.hour
-        df['Month'] = df['Datetime'].dt.month
-        
-        # Standardize day names
+        df['Hour'] = df['Datetime'].dt.hour.astype('int8')
+        df['Month'] = df['Datetime'].dt.month.astype('int8')
         df['Day'] = df['Day'].str.capitalize()
         
-        # Check if we have required columns
-        required_columns = ["Day", "Hour", "Month", "Latitude", "Longitude", "District", "Category"]
-        missing_cols = [col for col in required_columns if col not in df.columns]
-        if missing_cols:
-            raise ValueError(f"Missing required columns after processing: {missing_cols}")
-            
-        # Ensure we have the required columns
-        df = df.dropna(subset=required_columns)
+        # Filter valid coordinates
+        df = df[
+            df['Latitude'].between(-90, 90) & 
+            df['Longitude'].between(-180, 180)
+        ].copy()
         
-        # Convert to proper types
-        df['Hour'] = df['Hour'].astype(int)
-        df['Month'] = df['Month'].astype(int)
+        # Optimize data types
+        df['Day'] = df['Day'].astype('category')
+        df['Category'] = df['Category'].astype('category')
+        df['District'] = df['District'].astype('category')
+        df['Latitude'] = df['Latitude'].astype('float32')
+        df['Longitude'] = df['Longitude'].astype('float32')
         
         return df
+    
     except Exception as e:
         logger.error(f"Error loading data: {e}")
         raise
@@ -55,46 +61,117 @@ def load_data():
 def get_top_districts(df, top_n=5):
     return df["District"].value_counts().head(top_n).to_dict()
 
-def prepare_heatmap_data(df, sample_size=5000):
+def prepare_heatmap_data(df, sample_size=10000):
     try:
-        # Keep only recent 3 months data
-        recent_date = df['Datetime'].max() - pd.DateOffset(months=3)
-        df = df[df['Datetime'] >= recent_date]
-
-        # Calculate absolute counts instead of ratios
-        district_counts = df["District"].value_counts()
-        max_count = district_counts.max()
-        
-        heatmap_data = []
-        for _, row in df.iterrows():
-            count = district_counts.get(row["District"], 0)
+        if df.empty:
+            logger.warning("Empty DataFrame received for heatmap")
+            return []
             
-            # Dynamic color and size based on absolute counts
-            if count > max_count * 0.2:
+        # Get recent data (3 months or fallback to 6 months)
+        current_date = pd.Timestamp.now()
+        date_threshold = current_date - relativedelta(months=3)
+        recent_df = df[df['Datetime'] >= date_threshold].copy()
+        
+        if len(recent_df) < 1000:  # Fallback to 6 months if not enough data
+            date_threshold = current_date - relativedelta(months=6)
+            recent_df = df[df['Datetime'] >= date_threshold].copy()
+            logger.info(f"Using 6 months data (count: {len(recent_df)})")
+        
+        if len(recent_df) < 500:  # Final fallback to 1 year
+            date_threshold = current_date - relativedelta(months=12)
+            recent_df = df[df['Datetime'] >= date_threshold].copy()
+            logger.info(f"Using 12 months data (count: {len(recent_df)})")
+        
+        # If still too large, sample it
+        if len(recent_df) > 50000:
+            recent_df = recent_df.sample(n=50000, random_state=42)
+            logger.info(f"Sampled 50,000 records from {len(recent_df)} total")
+        
+        # Round coordinates to reduce points
+        recent_df = recent_df.assign(
+            lat_round=recent_df['Latitude'].round(3),
+            lng_round=recent_df['Longitude'].round(3)
+        )
+        
+        # Aggregate data
+        heatmap_df = recent_df.groupby(
+            ['lat_round', 'lng_round', 'District', 'Category'],
+            observed=True
+        ).agg({
+            'Latitude': 'mean',
+            'Longitude': 'mean',
+            'Datetime': 'count'
+        }).rename(columns={'Datetime': 'count'}).reset_index()
+        
+        # Calculate percentiles
+        if len(heatmap_df) > 0:
+            counts = heatmap_df['count'].values
+            p70 = np.percentile(counts, 70)
+            p90 = np.percentile(counts, 90)
+        else:
+            p70, p90 = 1, 2
+            
+        # Prepare final data
+        heatmap_data = []
+        for _, row in heatmap_df.iterrows():
+            if row['count'] >= p90:
                 color = "#ff4444"  # Red
-                radius = 10
-            elif count > max_count * 0.1:
+                radius = 8
+            elif row['count'] >= p70:
                 color = "#ffbb33"  # Yellow
-                radius = 7
+                radius = 6
             else:
                 color = "#00C851"  # Green
-                radius = 5
-
+                radius = 4
+                
             heatmap_data.append({
-                "lat": row["Latitude"],
-                "lng": row["Longitude"],
+                "lat": float(row["Latitude"]),
+                "lng": float(row["Longitude"]),
                 "color": color,
                 "radius": radius,
-                "district": row["District"],
-                "category": row["Category"],
-                "datetime": str(row["Datetime"]),
-                "count": count
+                "district": str(row["District"]),
+                "category": str(row["Category"]),
+                "count": int(row["count"])
             })
-            
-        return heatmap_data
+        
+        return heatmap_data[:sample_size]
+        
     except Exception as e:
-        logger.error(f"Heatmap error: {e}")
+        logger.error(f"Heatmap processing error: {e}")
+        return []
+
+def generate_graph_data(df):
+    try:
+        # Calculate averages
+        hourly_avg = df.groupby("Hour", observed=True).size() / df['Datetime'].dt.date.nunique()
+        daily_avg = df.groupby("Day", observed=True).size() / (df['Datetime'].dt.isocalendar().week.nunique())
+        monthly_avg = df.groupby("Month", observed=True).size() / df['Datetime'].dt.year.nunique()
+
+        month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+        return {
+            "hourly": {
+                "labels": [f"{h}:00" for h in range(24)],
+                "data": [round(hourly_avg.get(h, 0), 1) for h in range(24)]
+            },
+            "daily": {
+                "labels": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+                "data": [round(daily_avg.get(day, 0), 1) for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]]
+            },
+            "monthly": {
+                "labels": month_names,
+                "data": [round(monthly_avg.get(m, 0), 1) for m in range(1,13)]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error generating graph data: {e}")
         raise
+
+
+
+def get_top_districts(df, top_n=5):
+    return df["District"].value_counts().head(top_n).to_dict()
 
 
 
@@ -193,7 +270,6 @@ def generate_graph_data(df):
 
 
 
-def prepare_heatmap_data(df, sample_size=5000):
     try:
         # Filter recent 3 months data
         recent_date = df['Datetime'].max() - pd.DateOffset(months=3)
